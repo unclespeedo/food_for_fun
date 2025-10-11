@@ -26,7 +26,7 @@ Each page shows a division with:
 import sys
 from pathlib import Path
 from collections import defaultdict
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import pandas as pd
 from reportlab.lib import colors
@@ -56,7 +56,7 @@ def read_excel_file(input_path: Path) -> pd.DataFrame:
     return df
 
 
-def parse_orders(df: pd.DataFrame) -> Dict[str, Dict[str, List[str]]]:
+def parse_orders(df: pd.DataFrame) -> Tuple[Dict[str, Dict[str, List[str]]], List[str]]:
     """
     Parse the Excel data into structured orders by homeroom.
 
@@ -64,9 +64,12 @@ def parse_orders(df: pd.DataFrame) -> Dict[str, Dict[str, List[str]]]:
     on the next row.
 
     Returns:
-        Dict mapping homeroom -> {student_name: [list of items ordered]}
+        Tuple of (homerooms_dict, all_unique_options)
+        homerooms_dict: Dict mapping homeroom -> {student_name: [list of items ordered]}
+        all_unique_options: List of all unique menu options found
     """
     homerooms = defaultdict(dict)
+    all_options = set()
 
     # Column indices based on analysis
     STUDENT_NAME_COL = 3
@@ -92,6 +95,8 @@ def parse_orders(df: pd.DataFrame) -> Dict[str, Dict[str, List[str]]]:
             options = df.iloc[i + 1, OPTIONS_COL]
             if pd.notna(options):
                 items = [item.strip() for item in str(options).split(',')]
+                # Add to all_options set
+                all_options.update(items)
 
         # Store in homerooms dict (just by homeroom, not grade)
         homeroom_key = str(homeroom).strip()
@@ -100,7 +105,111 @@ def parse_orders(df: pd.DataFrame) -> Dict[str, Dict[str, List[str]]]:
         # Skip ahead - student rows seem to be spaced out
         i += 1
 
-    return homerooms
+    return homerooms, sorted(list(all_options))
+
+
+def get_user_groupings(all_options: List[str]) -> Optional[List[List[str]]]:
+    """
+    Prompt user to create groupings of menu options.
+    
+    Returns:
+        List of groups, where each group is a list of option names.
+        Returns None if user doesn't want to create groupings.
+    """
+    print(f"\nFound {len(all_options)} unique menu options:")
+    for i, option in enumerate(all_options, 1):
+        print(f"  {i:2d}. {option}")
+    
+    print("\nWould you like to group any of these options together? (y/n): ", end="")
+    response = input().strip().lower()
+    
+    if response not in ['y', 'yes']:
+        return None
+    
+    groupings = []
+    used_options = set()
+    
+    while True:
+        print(f"\nAvailable options:")
+        available_options = [(i, option) for i, option in enumerate(all_options, 1) 
+                           if option not in used_options]
+        
+        if not available_options:
+            print("All options have been grouped!")
+            break
+            
+        for i, option in available_options:
+            print(f"  {i:2d}. {option}")
+        
+        print("\nEnter the numbers of options to group together (comma-separated): ", end="")
+        user_input = input().strip()
+        
+        if not user_input:
+            break
+            
+        try:
+            # Parse the comma-separated numbers
+            numbers = [int(n.strip()) for n in user_input.split(',')]
+            
+            # Convert to option names
+            group_options = []
+            for num in numbers:
+                if 1 <= num <= len(all_options):
+                    option_name = all_options[num - 1]
+                    if option_name not in used_options:
+                        group_options.append(option_name)
+                        used_options.add(option_name)
+                    else:
+                        print(f"Warning: Option '{option_name}' is already in a group")
+                else:
+                    print(f"Warning: Invalid option number {num}")
+            
+            if group_options:
+                groupings.append(group_options)
+                print(f"Created group: {', '.join(group_options)}")
+            else:
+                print("No valid options selected for this group")
+                
+        except ValueError:
+            print("Invalid input. Please enter comma-separated numbers.")
+            continue
+        
+        print("\nCreate another group? (y/n): ", end="")
+        if input().strip().lower() not in ['y', 'yes']:
+            break
+    
+    # Add remaining ungrouped options as one final group
+    ungrouped = [option for option in all_options if option not in used_options]
+    if ungrouped:
+        groupings.append(ungrouped)
+        print(f"Added remaining options as final group: {', '.join(ungrouped)}")
+    
+    return groupings
+
+
+def get_max_class_size() -> int:
+    """
+    Prompt user for maximum class size to add blank spaces for additional students.
+    
+    Returns:
+        Maximum class size (0 if user doesn't want to specify)
+    """
+    print("\nWould you like to specify a maximum class size to add blank spaces for additional students? (y/n): ", end="")
+    response = input().strip().lower()
+    
+    if response not in ['y', 'yes']:
+        return 0
+    
+    while True:
+        try:
+            print("Enter maximum class size: ", end="")
+            size = int(input().strip())
+            if size > 0:
+                return size
+            else:
+                print("Please enter a positive number.")
+        except ValueError:
+            print("Please enter a valid number.")
 
 
 def create_rotated_text(text: str) -> Drawing:
@@ -128,13 +237,16 @@ def create_rotated_text(text: str) -> Drawing:
 
 def create_homeroom_table(
     student_orders: Dict[str, List[str]],
-    homeroom: str
-) -> Tuple[List[List], List[float]]:
+    homeroom: str,
+    groupings: Optional[List[List[str]]] = None,
+    max_class_size: int = 0
+) -> Tuple[List[List], List[float], List[Tuple[int, int]]]:
     """
     Create table data for a single division.
 
     Returns:
-        (table_data, column_widths)
+        (table_data, column_widths, group_boundaries)
+        group_boundaries: List of (start_row, end_row) tuples for each group
     """
     # Get all unique menu items across all students
     all_items = []
@@ -146,30 +258,69 @@ def create_homeroom_table(
 
     if not unique_items:
         # No items ordered in this division
-        return None, None
+        return None, None, None
 
     # Get sorted student names
     students = sorted(student_orders.keys())
+    
+    # Add blank spaces for additional students if max_class_size is specified
+    if max_class_size > 0:
+        current_students = len(students)
+        if current_students < max_class_size:
+            blank_count = max_class_size - current_students
+            # Add blank students at the beginning (far left)
+            blank_students = [""] * blank_count
+            students = blank_students + students
 
     # Build table data
     # Header row: student names (rotated) + ["Options", "Total"]
     header_row = []
     for student in students:
-        header_row.append(create_rotated_text(student))
+        if student == "":
+            # Empty header for blank student columns
+            header_row.append("")
+        else:
+            header_row.append(create_rotated_text(student))
     header_row.append("Options")
     header_row.append("Total")
 
     table_data = [header_row]
 
+    # Determine item order based on groupings
+    ordered_items = []
+    group_boundaries = []
+    
+    if groupings:
+        # Use groupings to determine order
+        current_row = 1  # Start after header row
+        for group in groupings:
+            group_start = current_row
+            for item in group:
+                if item in unique_items:
+                    ordered_items.append(item)
+                    current_row += 1
+            if current_row > group_start:
+                group_boundaries.append((group_start, current_row - 1))
+    else:
+        # No groupings, use original order
+        ordered_items = unique_items
+        # Each item is its own group
+        for i, item in enumerate(ordered_items):
+            group_boundaries.append((i + 1, i + 1))
+
     # Data rows: one per menu item
-    for item in unique_items:
+    for item in ordered_items:
         row = []
         row_total = 0
         for student in students:
             # Count how many times this student ordered this item
-            count = student_orders[student].count(item)
-            row.append(str(count) if count > 0 else "")
-            row_total += count
+            # For blank students (empty string), always show empty
+            if student == "":
+                row.append("")
+            else:
+                count = student_orders[student].count(item)
+                row.append(str(count) if count > 0 else "")
+                row_total += count
         row.append(item)
         row.append(str(row_total))
         table_data.append(row)
@@ -188,12 +339,14 @@ def create_homeroom_table(
         [options_col_width, total_col_width]
     )
 
-    return table_data, col_widths
+    return table_data, col_widths, group_boundaries
 
 
 def create_pdf_from_homerooms(
     homerooms: Dict[str, Dict[str, List[str]]],
-    output_path: Path
+    output_path: Path,
+    groupings: Optional[List[List[str]]] = None,
+    max_class_size: int = 0
 ) -> None:
     """Create multi-page PDF with one page per homeroom."""
 
@@ -217,7 +370,9 @@ def create_pdf_from_homerooms(
     pages_created = 0
     for idx, (homeroom, student_orders) in enumerate(sorted_homerooms):
         # Create table
-        table_data, col_widths = create_homeroom_table(student_orders, homeroom)
+        table_data, col_widths, group_boundaries = create_homeroom_table(
+            student_orders, homeroom, groupings, max_class_size
+        )
 
         if table_data is None:
             # Skip homerooms with no orders
@@ -238,7 +393,8 @@ def create_pdf_from_homerooms(
         num_rows = len(table_data)
         num_cols = len(table_data[0])
 
-        table.setStyle(TableStyle([
+        # Build table style commands
+        style_commands = [
             # Header row (student names) - no background
             ('ALIGN', (0, 0), (-3, -1), 'CENTER'),  # Students centered
             ('ALIGN', (-2, 0), (-2, -1), 'LEFT'),  # Options left-aligned
@@ -265,7 +421,18 @@ def create_pdf_from_homerooms(
             # Grid
             ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
             ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
-        ]))
+        ]
+
+        # Add thicker borders between groups if groupings exist
+        if group_boundaries and len(group_boundaries) > 1:
+            for i in range(len(group_boundaries) - 1):
+                # Add thick border after each group (except the last)
+                end_row = group_boundaries[i][1]
+                style_commands.append(
+                    ('LINEBELOW', (0, end_row), (-1, end_row), 1.5, colors.black)
+                )
+
+        table.setStyle(TableStyle(style_commands))
 
         elements.append(table)
 
@@ -273,7 +440,10 @@ def create_pdf_from_homerooms(
         num_students = len(student_orders)
         total_items = sum(len(items) for items in student_orders.values())
         elements.append(Spacer(1, 0.2*inch))
-        summary = f"Students: {num_students} | Total Items Ordered: {total_items}"
+        if max_class_size > 0:
+            summary = f"Students: {num_students}/{max_class_size} | Total Items Ordered: {total_items}"
+        else:
+            summary = f"Students: {num_students} | Total Items Ordered: {total_items}"
         elements.append(Paragraph(summary, styles['Normal']))
 
         pages_created += 1
@@ -312,7 +482,7 @@ def main() -> int:
     print(f"Reading Excel file: {input_path}")
     try:
         df = read_excel_file(input_path)
-        homerooms = parse_orders(df)
+        homerooms, all_options = parse_orders(df)
         print(f"Found {len(homerooms)} homerooms")
 
         # Show homeroom summary
@@ -327,10 +497,16 @@ def main() -> int:
         print(f"Error reading Excel file: {e}")
         return 1
 
+    # Get user groupings
+    groupings = get_user_groupings(all_options)
+    
+    # Get max class size
+    max_class_size = get_max_class_size()
+
     # Create PDF
     print(f"\nCreating PDF: {output_path}")
     try:
-        create_pdf_from_homerooms(homerooms, output_path)
+        create_pdf_from_homerooms(homerooms, output_path, groupings, max_class_size)
     except Exception as e:
         print(f"Error creating PDF: {e}")
         import traceback
