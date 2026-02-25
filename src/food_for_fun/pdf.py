@@ -39,18 +39,18 @@ def _rotated_text(text: str) -> Drawing:
     Returns:
         A Drawing containing the rotated text.
     """
-    text_width = len(text) * 5
-    d = Drawing(12, text_width + 5)
+    text_width = len(text) * 4.5
+    d = Drawing(10, text_width + 4)
 
     g = Group()
     s = String(0, 0, text)
-    s.fontSize = 8
+    s.fontSize = 7
     s.fontName = "Helvetica"
     s.textAnchor = "start"
 
     g.add(s)
     g.rotate(270)
-    g.shift(2, text_width + 5)
+    g.shift(2, text_width + 4)
 
     d.add(g)
     return d
@@ -128,6 +128,11 @@ def _build_table_data(
         blanks = config.max_class_size - len(students)
         students = [""] * blanks + students
 
+    if config.blank_columns > 0:
+        students = (
+            [""] * config.blank_columns + students
+        )
+
     # Header row: student names + Options + Total
     header: list[object] = [
         _rotated_text(s) if s else ""
@@ -194,12 +199,14 @@ def _table_style(
          "Helvetica-Bold"),
         ("FONTSIZE", (-2, 0), (-2, 0), 10),
         ("FONTSIZE", (-1, 0), (-1, 0), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
-        ("TOPPADDING", (0, 0), (-1, 0), 40),
-        ("TOPPADDING", (-2, 0), (-1, 0), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 3),
+        ("TOPPADDING", (0, 0), (-1, 0), 25),
+        ("TOPPADDING", (-2, 0), (-1, 0), 6),
         ("VALIGN", (0, 0), (-3, 0), "TOP"),
         ("FONTNAME", (0, 1), (-3, -1), "Helvetica"),
-        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("FONTSIZE", (0, 1), (-1, -1), 7),
+        ("TOPPADDING", (0, 1), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 2),
         (
             "ROWBACKGROUNDS", (0, 1), (-1, -1),
             [colors.white, colors.lightgrey],

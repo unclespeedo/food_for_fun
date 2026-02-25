@@ -61,7 +61,10 @@ class PdfConfig:
         groupings: Optional menu item groupings.
         max_class_size: Max class size for blank columns.
             Zero means no blanks.
+        blank_columns: Extra blank columns to add to
+            every division.
     """
 
     groupings: list[list[str]] | None = None
     max_class_size: int = 0
+    blank_columns: int = 0
