@@ -79,14 +79,16 @@ def _order_items(
         return items, boundaries
 
     ordered: list[str] = []
+    seen: set[str] = set()
     boundaries: list[tuple[int, int]] = []
     current_row = 1
 
     for group in groupings:
         group_start = current_row
         for item in group:
-            if item in unique_items:
+            if item in unique_items and item not in seen:
                 ordered.append(item)
+                seen.add(item)
                 current_row += 1
         if current_row > group_start:
             boundaries.append(

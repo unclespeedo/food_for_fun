@@ -43,6 +43,21 @@ class TestOrderItems:
 
         assert ordered == ["Pizza", "Milk"]
 
+    def test_groupings_dedup_across_groups(self) -> None:
+        """Duplicates across groups are included once."""
+        items = ["Milk", "Pizza", "Salad"]
+        groupings = [
+            ["Pizza", "Milk"],
+            ["Milk", "Salad"],
+        ]
+
+        ordered, boundaries = _order_items(
+            items, groupings
+        )
+
+        assert ordered == ["Pizza", "Milk", "Salad"]
+        assert boundaries == [(1, 2), (3, 3)]
+
 
 class TestBuildTableData:
     """Tests for _build_table_data."""
