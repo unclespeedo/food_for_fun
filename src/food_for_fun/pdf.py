@@ -93,6 +93,18 @@ def _order_items(
                 (group_start, current_row - 1)
             )
 
+    remaining = [
+        item for item in unique_items
+        if item not in ordered
+    ]
+    if remaining:
+        group_start = current_row
+        ordered.extend(remaining)
+        current_row += len(remaining)
+        boundaries.append(
+            (group_start, current_row - 1)
+        )
+
     return ordered, boundaries
 
 

@@ -9,7 +9,6 @@ from food_for_fun.models import HomeroomOrders, ParseResult
 
 # Column indices in the Excel report
 _STUDENT_NAME_COL = 3
-_GRADE_COL = 8
 _HOMEROOM_COL = 11
 _OPTIONS_COL = 43
 
